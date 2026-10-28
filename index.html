@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>[hidden]{display:none!important}body{margin:0}</style>
+<title>Soham's Teleprompter</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: one dark stage; the line you are on sits just under the top edge, closest to the camera lens above it. */
+:root{
+  --stage:#0b0c0e; --ink:#f4f1ea; --spoken:#5c5f66; --line:#e8b931; --panel:#17191d; --muted:#9a9ea6; --edge:#2a2d33;
+  --read:"Atkinson Hyperlegible",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+  color-scheme:dark;
+}
+html,body{height:100%}
+body{background:var(--stage);color:var(--ink);font-family:var(--read);overflow:hidden;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+button,select,input{font:inherit;color:inherit}
+#picker{height:100%;overflow-y:auto;padding-block:16px;max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+#picker h1{font-size:22px;margin:0;text-wrap:balance}
+#picker p{margin:0;color:var(--muted);line-height:1.5;max-width:60ch}
+.group{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:6px}
+.list{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px}
+.pick{background:var(--panel);border:1px solid var(--edge);border-radius:10px;padding:12px 14px;text-align:left;cursor:pointer;display:flex;flex-direction:column;gap:4px;min-width:0}
+.pick:hover,.pick:focus-visible{border-color:var(--line);outline:none}
+.pick b{font-size:16px}
+.pick span{font-family:var(--mono);font-size:12px;color:var(--muted)}
+#stage{position:fixed;inset:0;display:flex;flex-direction:column}
+#scroller{flex:1;overflow:hidden;position:relative}
+#text{max-width:var(--col,62%);margin:0 auto;padding:var(--lead,14vh) 0 80vh;font-size:var(--fs,44px);line-height:1.32;font-weight:700}
+#stage.mirror #text{transform:scaleX(-1)}
+#text .w{transition:color .2s}
+#text .w.done{color:var(--spoken)}
+#text .w.now{color:var(--line)}
+#text .sec{display:block;font-family:var(--mono);font-weight:500;font-size:.42em;letter-spacing:.1em;color:var(--line);margin:1.4em 0 .4em;text-transform:uppercase}
+#text .sec:first-child{margin-top:0}
+#marker{position:absolute;left:0;right:0;top:var(--lead,14vh);height:0;border-top:2px solid var(--line);opacity:.35;pointer-events:none}
+#bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding-block:8px;padding-bottom:calc(8px + env(safe-area-inset-bottom,0px));background:var(--panel);border-top:1px solid var(--edge)}
+#stage.running #bar{opacity:.0;pointer-events:none}
+#stage.running.peek #bar{opacity:1;pointer-events:auto}
+#bar button{background:var(--stage);border:1px solid var(--edge);border-radius:8px;padding:8px 12px;cursor:pointer}
+#bar button:focus-visible{outline:2px solid var(--line)}
+#bar button.on{border-color:var(--line);color:var(--line)}
+#go{background:var(--line)!important;color:#111!important;font-weight:700;border-color:var(--line)!important}
+#bar label{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12px;color:var(--muted)}
+#bar input[type=range]{width:90px;accent-color:var(--line)}
+#status{font-family:var(--mono);font-size:12px;color:var(--muted);margin-left:auto;min-width:0}
+#heard{position:absolute;left:0;right:0;bottom:6px;text-align:center;font-family:var(--mono);font-size:12px;color:var(--muted);pointer-events:none}
+@media (prefers-reduced-motion:reduce){#text .w{transition:none}}
+</style>
+
+<section id="picker">
+  <h1>Soham's Teleprompter</h1>
+  <p>Open this on the phone lying sideways above your camera. Pick a script, press Start, and talk. The line you are on stays at the top, closest to the lens. Each script runs once, then hook B and hook C. Press Restart for your next take.</p>
+  <div id="lists"></div>
+</section>
+
+<section id="stage" hidden>
+  <div id="scroller"><div id="marker"></div><div id="text"></div><div id="heard"></div></div>
+  <div id="bar">
+    <button id="back" type="button">Scripts</button>
+    <button id="go" type="button">Start</button>
+    <button id="restart" type="button">Restart</button>
+    <button id="voice" type="button" title="Scroll by listening to you">Follow my voice</button>
+    <label for="speed">Speed <input id="speed" type="range" min="60" max="260" step="5" value="165"><span id="speedv">165</span></label>
+    <label for="size">Size <input id="size" type="range" min="28" max="84" step="2" value="44"></label>
+    <label for="col">Width <input id="col" type="range" min="35" max="95" step="1" value="62"></label>
+    <button id="mirror" type="button">Mirror</button>
+    <span id="status"></span>
+  </div>
+</section>
+
+<script>
+const SCRIPTS = [{"name": "MiroFish", "kw": "STARTUP", "lang": "en", "text": "Test your idea on thousands of AI people first. It's called MiroFish, a free tool with over 80,000 stars on GitHub. So you give it your idea or a short report, and it builds a small world full of simulated people, where each one has their own personality and their own memory. Then it puts them on a Twitter and Reddit style feed and lets them react and argue with each other. At the end it writes you a full report, and you can even chat with any one of them and ask why. One thing, guys, these are simulated people, not real customers, and it runs on your own AI key, so start with small runs. Just comment STARTUP down below and I'll send you the link directly.", "hooks": [{"k": "B", "t": "Your startup idea can be tested before you build it."}, {"k": "C", "t": "Thousands of AI people can judge your idea tonight."}], "group": "Nick references, English"}, {"name": "Replica", "kw": "CLONE", "lang": "en", "text": "Paying every month for an app you could rebuild? So there is a free set of 11 skills for Claude Code called Replica, and it already has over 6,000 stars. You point it at an app, and first it maps every screen. Then it rebuilds it screen by screen, adds the login, database and payments, and clicks through every flow to test it for bugs. It even reads real reviews from the App Store, G2 and Reddit, so your version fixes what people hate, and then it gives it your own brand. But guys, let me tell you one thing, it rebuilds the features, not the content, and a big app still takes weeks, so check the app's terms first. Comment CLONE down below and I'll send you the link directly.", "hooks": [{"k": "B", "t": "Stop paying for an app you can rebuild yourself."}, {"k": "C", "t": "Your Claude Code can rebuild the apps you pay for."}], "group": "Nick references, English"}, {"name": "Agency Agents", "kw": "AGENCY", "lang": "en", "text": "You can run a whole agency from your Claude Code. It's called Agency Agents, a free library of over 230 AI specialists, and literally over 160,000 people have starred it on GitHub. Each one has its own job and its own way of talking. So you get an outreach agent for your cold emails, a coach to prep your sales calls, a proposal writer, and a whole team of engineers to build for your client. Plus social media, design, customer support and even a bookkeeper. And one orchestrator agent runs the project and checks every step before moving on. One thing, the library is free, but it runs on your Claude plan and you still have to drive it. Comment AGENCY down below and I'll send you the link directly.", "hooks": [{"k": "B", "t": "Your one person business can have a full team now."}, {"k": "C", "t": "230 AI specialists can work inside your Claude Code."}], "group": "Nick references, English"}, {"name": "cleanyourtv", "kw": "TV", "lang": "en", "text": "Your Android TV is full of ads you never wanted. So someone on X gave Claude Code just his TV's model number, and it found the TV on the Wi-Fi, switched off 25 bloatware apps and wrote a brand new home screen. That post went viral, and now it is a free GitHub repo called cleanyourtv with over 40,000 stars. You turn on developer mode, paste one prompt with your TV model, and in about fifteen minutes you get a clean home screen that looks like Apple TV. And if you don't like it, one line puts everything back. But guys, it works on Android TV and Google TV only, not Samsung or LG, and it can affect your warranty. Comment TV down below and I'll send you the link directly.", "hooks": [{"k": "B", "t": "Clean every ad off your Android TV in fifteen minutes."}, {"k": "C", "t": "Your TV's home screen can look like Apple TV."}], "group": "Nick references, English"}, {"name": "Sound for your AI edits", "kw": "SOUND", "lang": "en", "text": "Your AI video edits look great but sound empty. That was literally my problem, so last week my agent set up two free tools in my own video pipeline. The first is Openverse, a free search across over 5 million audio files, with more than half a million sound effects, and your agent can search and download them on its own. The second is Earshot, and this one actually listens to your video second by second and shows you where every sound lands. And if it can't find the right effect, it makes a brand new one in code, or even a whole kit for your project. One thing, check each sound's licence before you post. Comment SOUND down below and I'll send you the links directly.", "hooks": [{"k": "B", "t": "The sound effects in your AI edits are the problem."}, {"k": "C", "t": "Two free tools fix the sound in your AI edits."}], "group": "Nick references, English"}, {"name": "Google Artemis", "kw": "GOOGLE", "lang": "en", "text": "Your Claude Code can now use a real Android phone. Google has open sourced a tool called Artemis, it has over 15,000 stars, and it works on your phone just like a human would. It opens apps, taps through the screens and sends you back screenshots of the result, and on Google's own AndroidWorld test it finishes over 99% of the tasks. So you can test your own apps on a real device, or hand off the boring phone stuff. Plus it has its own MCP server, so it plugs straight into Claude Code and Codex. One thing, guys, it is Android only for now, and it runs on your own AI key, so it is not fully free. Comment GOOGLE down below and I'll send you the link directly.", "hooks": [{"k": "B", "t": "Let your AI agent use your phone for you."}, {"k": "C", "t": "Google's free tool lets AI tap through your phone."}], "group": "Nick references, English"}, {"name": "cleanyourtv (Hinglish)", "kw": "TV", "lang": "hi", "text": "Aapka Android TV ads se bhara hai, right? Toh someone on X gave Claude Code just his TV's model number, and it found the TV on the Wi-Fi, switched off 25 bloatware apps and wrote a brand new home screen. Post viral ho gaya, aur ab it's a free GitHub repo called cleanyourtv with over 40,000 stars. You turn on developer mode, paste one prompt with your TV model, and bas fifteen minutes mein you get a clean home screen that looks like Apple TV. Pasand nahi aaya? One line puts everything back. But guys, ek baat, it works on Android TV and Google TV only, Samsung ya LG pe nahi, and it can affect your warranty. Comment TV down below and I'll send you the link directly.", "hooks": [{"k": "B", "t": "Fifteen minutes mein your Android TV is ad free."}, {"k": "C", "t": "Aapke TV ka home screen can look like Apple TV."}], "group": "Nick references, Hinglish test"}, {"name": "Replica (Hinglish)", "kw": "CLONE", "lang": "hi", "text": "Har mahine paying for an app you could rebuild? Toh Claude Code ke liye there is a free set of 11 skills called Replica, and it already has over 6,000 stars. You point it at an app, and pehle it maps every screen. Then it rebuilds it screen by screen, adds the login, database and payments, and clicks through every flow to test it for bugs. It even reads real reviews from the App Store, G2 and Reddit, so your version fixes what log hate karte hain, and phir it gives it your own brand. But guys, ek baat bata doon, matlab it rebuilds the features, content nahi, and a big app still takes weeks, toh pehle check the app's terms. Comment CLONE down below and I'll send you the link directly.", "hooks": [{"k": "B", "t": "Jis app ke liye you pay, rebuild it yourself."}, {"k": "C", "t": "Aapka Claude Code can rebuild the apps you pay for."}], "group": "Nick references, Hinglish test"}, {"name": "Google Artemis (Hinglish)", "kw": "GOOGLE", "lang": "hi", "text": "Ab your Claude Code can use a real Android phone. Google ne open source kiya hai a tool called Artemis, it has over 15,000 stars, and it works on your phone bilkul like a human would. It opens apps, taps through the screens and sends you back screenshots of the result, and Google ke apne AndroidWorld test pe it finishes over 99% of the tasks. Toh you can test your own apps on a real device, ya phir hand off the boring phone stuff. Plus it has its own MCP server, so it plugs straight into Claude Code and Codex. Ek baat, guys, it is Android only abhi ke liye, and it runs on your own AI key, toh fully free nahi hai. Comment GOOGLE down below and I'll send you the link directly.", "hooks": [{"k": "B", "t": "Ab your AI agent can use your phone for you."}, {"k": "C", "t": "Google ka free tool lets AI tap through your phone."}], "group": "Nick references, Hinglish test"}, {"name": "repo-voicestudio", "kw": "VOICESTUDIO", "lang": "en", "group": "Pack 2 (7 October scripts)", "text": "Your laptop can now speak in your voice. A free app clones it from one clip of you talking. 3 seconds is usually enough. Then it reads whatever you type, in that voice, in any of 646 languages. It's called VoiceStudio, and it runs on your own computer. It replaces the $22 a month voice cloning tool. Over 40,000 people have starred it. Download it, open Voice cloning, add your recording and type your text. One catch: clone only voices you have permission to use, and without a proper graphics card it runs several times slower. Want the link? Comment VOICESTUDIO and I'll send it to you directly.", "hooks": [{"k": "B", "t": "Stop paying every month to clone your voice."}, {"k": "C", "t": "You can clone your own voice for free."}]}, {"name": "repo-geo-sleuth", "kw": "GEOSLEUTH", "lang": "en", "group": "Pack 2 (7 October scripts)", "text": "One photo, and this free tool finds where you stood. No sign, no number plate, no landmark. In its own demo, it landed within 2 metres. It's called geo-sleuth, and it runs inside your Claude Code. It matches hills and bridges in your photo against map and elevation data. That demo checked 27,335 bridge segments and settled on one spot. One command adds it. Then you hand it your photo and say: find where this photo was taken. The catch: it's under a month old, and it needs Python on your machine. Run it on your own photos, never on someone who hasn't agreed to be found. Want the link? Comment GEOSLEUTH and I'll send it to you directly.", "hooks": [{"k": "B", "t": "This free tool can find where your photo was taken."}, {"k": "C", "t": "Your photo gives away more than you think."}]}, {"name": "instinct", "kw": "INSTINCT", "lang": "en", "group": "Pack 2 (7 October scripts)", "text": "Text this app, and it runs your errands. A ride to the airport, a handyman for your flat... it handles both. It's called Instinct, and it lives inside the chat apps you already text on. Nothing new to learn. Its whole homepage is a stick figure and a few paragraphs... and it's worth $2.5 billion. You get in with an invite from someone inside... or you wait. Meta has its own version now, called Muse, and you message it right inside WhatsApp. No invite... you just download it. It's past 3 million downloads already. US and Canada only, for now. Want the link? Comment INSTINCT and I'll send it to you directly.", "hooks": [{"k": "B", "t": "Your errands can now be done by one text."}, {"k": "C", "t": "This app books your ride from a chat message."}]}, {"name": "repo-yue2-studio", "kw": "YUE2", "lang": "en", "group": "Pack 2 (7 October scripts)", "text": "Type your lyrics, and this free app sings them. Whole songs with vocals, made on your own graphics card. It's called YuE2 Studio, and nothing you make leaves your computer. Your melody comes back first as notes on a page. Move one note, change the tempo, press create again... same song, sung a different way. Run the installer, pick the model set it suggests for your card, and press create. The catch: Windows only, an NVIDIA card with 6 GB of video memory or more, and the songs are for non-commercial use. Want the link? Comment YUE2 and I'll send it to you directly.", "hooks": [{"k": "B", "t": "Your lyrics can become a full song tonight, free."}, {"k": "C", "t": "A free app turns your lyrics into a sung song."}]}, {"name": "repo-ai-visual-prompt-cookbook", "kw": "COOKBOOK", "lang": "en", "group": "Pack 2 (7 October scripts)", "text": "ChatGPT can paint your idea like a magazine cover. You paste in one text file from a free website, and your picture comes back in that exact look. The site is the AI Visual Prompt Cookbook. 154 styles, each with a sample picture. The file carries the whole look. You only fill in who is in your picture and the words on it. Open the site, copy a style, paste it into your chat, fill in the blanks. The catch: the recipe is long, so your image tool has to read a long brief. Share the file and the licence asks you to credit the author. Want the link? Comment COOKBOOK and I'll send it to you directly.", "hooks": [{"k": "B", "t": "Make your ChatGPT pictures look like a magazine cover."}, {"k": "C", "t": "One file makes your ChatGPT image look like a poster."}]}, {"name": "repo-tiny-tts", "kw": "TINYTTS", "lang": "en", "group": "Pack 2 (7 October scripts)", "text": "This 3.4 megabyte file reads your text out loud. It's a free tool called TinyTTS, and it runs on the laptop you already own, no graphics card. You type a sentence, press play, and the voice comes back to you in 92 milliseconds. A typical voice model makes you download 200 megabytes or more to do that. Not this one. Try it in your browser on the demo page, no install. Or one command on your own machine, pip install tiny-tts. The catch: English only, one male voice. And the last update was in April. Want the link? Comment TINYTTS and I'll send it to you directly.", "hooks": [{"k": "B", "t": "Your old laptop can read text aloud, no graphics card."}, {"k": "C", "t": "You do not need a big download for a voice."}]}, {"name": "repo-gymmane", "kw": "GYMMANE", "lang": "en", "group": "Pack 2 (7 October scripts)", "text": "This free gym app never asks for internet. So your workouts cannot leave your phone. No account, no ads. It's called GymMane, and one developer built it. Tap the muscles you want to train on a body map and it hands you a session. Over 500 exercises, each one animated. Your records and your streak come from your own sets. Install it from F-Droid, and if your history is in Hevy or Strong, import it and carry on. The catch: Android 7 or newer only, and the iPhone version is still a work in progress. Want the link? Comment GYMMANE and I'll send it to you directly.", "hooks": [{"k": "B", "t": "This gym app works with your internet switched off."}, {"k": "C", "t": "A free gym app that never goes online."}]}, {"name": "repo-autorun", "kw": "AUTORUN", "lang": "en", "group": "Pack 2 (7 October scripts)", "text": "Your Nintendo Switch can run Halo now. A free app plays it at about 30 frames a second, off your microSD card. Autorun runs old PC games on the console, from copies you already own. You copy a game's folder onto the card, add it to your library and press play. The game that lived on your desktop is in your hands. The controller is your mouse and keyboard. The catch: it needs a console already hacked for unofficial software, and it is experimental, so many games start and then stop. Only 32-bit games work. So nothing much after the early 2010s. Want the link? Comment AUTORUN and I'll send it to you directly.", "hooks": [{"k": "B", "t": "Halo now runs on your Nintendo Switch."}, {"k": "C", "t": "You can play Halo on a Switch you own."}]}];
+const $ = s => document.querySelector(s);
+const store = {get(k,d){try{const v=localStorage.getItem('tp.'+k);return v==null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem('tp.'+k,JSON.stringify(v))}catch(e){}}};
+
+// ---------- picker
+const groups = {};
+SCRIPTS.forEach((s,i)=>{(groups[s.group]=groups[s.group]||[]).push(i)});
+for (const g of Object.keys(groups)){
+  const h=document.createElement('div');h.className='group';h.textContent=g;$('#lists').appendChild(h);
+  const l=document.createElement('div');l.className='list';
+  groups[g].forEach(i=>{const s=SCRIPTS[i];const b=document.createElement('button');b.type='button';b.className='pick';
+    b.innerHTML='<b></b><span></span>';b.querySelector('b').textContent=s.name;
+    b.querySelector('span').textContent='COMMENT '+s.kw+' · '+s.text.split(/\s+/).length+' words';
+    b.onclick=()=>open(i);l.appendChild(b)});
+  $('#lists').appendChild(l);
+}
+
+// ---------- text
+const norm = w => w.toLowerCase().replace(/[’']/g,"'").replace(/[^a-z0-9%$.']/g,'').replace(/\.$/,'').replace(/,/g,'');
+let words=[], spans=[], ptr=0, cur=null;
+function open(i){
+  cur=i; const s=SCRIPTS[i]; const box=$('#text'); box.innerHTML=''; words=[]; spans=[];
+  const parts=[['Script',s.text]].concat(s.hooks.map(h=>['Hook '+h.k,h.t]));
+  parts.forEach(([label,t])=>{
+    const sec=document.createElement('span');sec.className='sec';sec.textContent=label;box.appendChild(sec);
+    t.split(/\s+/).forEach(tok=>{const sp=document.createElement('span');sp.className='w';sp.textContent=tok;box.appendChild(sp);box.appendChild(document.createTextNode(' '));
+      words.push(norm(tok));spans.push(sp)});
+  });
+  $('#picker').hidden=true; $('#stage').hidden=false; reset(); store.set('last',i);
+}
+function reset(){ptr=0;offset=0;target=0;paint();stop();$('#heard').textContent='';}
+function paint(){spans.forEach((sp,k)=>{sp.classList.toggle('done',k<ptr);sp.classList.toggle('now',k===ptr)})}
+
+// ---------- scroll engine
+let offset=0, target=0, running=false, mode='speed', last=0;
+function lineTop(k){const sp=spans[Math.min(k,spans.length-1)];return sp?sp.offsetTop-parseFloat(getComputedStyle($('#text')).paddingTop):0}
+function tick(t){
+  const dt=Math.min(.1,(t-last)/1000||0); last=t;
+  if(running && mode==='speed'){
+    // words per minute -> pixels: advance the word pointer by time, follow its line
+    acc+=dt*(+$('#speed').value)/60;
+    while(acc>=1 && ptr<spans.length){acc-=1;ptr++;paint()}
+    target=lineTop(ptr);
+  }
+  if(mode==='voice') target=lineTop(ptr);
+  offset+= (target-offset)*Math.min(1,dt*6);
+  $('#text').style.transform=($('#stage').classList.contains('mirror')?'scaleX(-1) ':'')+'translateY('+(-offset)+'px)';
+  requestAnimationFrame(tick);
+}
+let acc=0; requestAnimationFrame(tick);
+
+// ---------- voice follow
+const SR = window.SpeechRecognition||window.webkitSpeechRecognition;
+let rec=null, listening=false;
+function startVoice(){
+  if(!SR){status('This browser cannot listen. Use Chrome, or Speed mode.');return false}
+  rec=new SR(); rec.lang=SCRIPTS[cur].lang==='hi'?'en-IN':'en-IN'; rec.continuous=true; rec.interimResults=true;
+  rec.onresult=e=>{
+    let txt='';for(let r=e.resultIndex;r<e.results.length;r++)txt+=' '+e.results[r][0].transcript;
+    const heard=txt.split(/\s+/).map(norm).filter(Boolean); if(!heard.length)return;
+    $('#heard').textContent=heard.slice(-6).join(' ');
+    follow(heard.slice(-6));
+  };
+  rec.onerror=e=>{ if(e.error==='not-allowed'||e.error==='service-not-allowed'){status('The microphone is blocked on this page. Use Speed mode.');listening=false;mode='speed';$('#voice').classList.remove('on')} else status('Listening hiccup: '+e.error) };
+  rec.onend=()=>{ if(listening){try{rec.start()}catch(e){}} };
+  try{rec.start();listening=true;status('Listening…');return true}catch(e){status('Could not start listening.');return false}
+}
+function stopVoice(){listening=false;if(rec){try{rec.stop()}catch(e){}}}
+const close=(a,b)=>a===b||(a.length>3&&b.length>3&&(a.startsWith(b.slice(0,4))||b.startsWith(a.slice(0,4))));
+function follow(heard){
+  // find where the last heard words sit in the script, a little behind to well ahead of where we are
+  let best=-1,bestScore=0;
+  const lo=Math.max(0,ptr-6), hi=Math.min(words.length-1,ptr+30);
+  for(let end=lo;end<=hi;end++){
+    let sc=0,j=end;
+    for(let h=heard.length-1;h>=0&&j>=0&&end-j<heard.length+3;h--){
+      // allow one skipped script word per heard word (fillers the recogniser drops)
+      if(close(heard[h],words[j])){sc+= words[j].length>2?1:.5;j--}
+      else if(j>0&&close(heard[h],words[j-1])){sc+=.7;j-=2}
+    }
+    sc-= Math.max(0,end-ptr)*0.02; // prefer nearby
+    if(sc>bestScore){bestScore=sc;best=end}
+  }
+  const need = best<ptr ? 3 : (heard.length<3?1:1.8);
+  if(best>=0 && bestScore>=need){ ptr=Math.min(words.length-1,best+1); paint(); }
+}
+
+// ---------- controls
+function status(t){$('#status').textContent=t}
+function play(){running=true;acc=0;$('#stage').classList.add('running');$('#go').textContent='Pause';
+  if(mode==='voice'&&!listening)startVoice(); wake();}
+function stop(){running=false;$('#stage').classList.remove('running','peek');$('#go').textContent='Start';stopVoice(); if(mode==='voice')status('')}
+$('#go').onclick=()=>running?stop():play();
+$('#restart').onclick=()=>{reset()};
+$('#back').onclick=()=>{stop();$('#stage').hidden=true;$('#picker').hidden=false};
+$('#voice').onclick=()=>{mode=mode==='voice'?'speed':'voice';$('#voice').classList.toggle('on',mode==='voice');store.set('mode',mode);
+  if(mode==='voice'&&running)startVoice(); if(mode==='speed'){stopVoice();status('')}};
+$('#mirror').onclick=()=>{$('#stage').classList.toggle('mirror');$('#mirror').classList.toggle('on')};
+function bindRange(id,fn){const el=$('#'+id);el.value=store.get(id,el.value);fn(el.value);el.oninput=()=>{fn(el.value);store.set(id,el.value)}}
+bindRange('speed',v=>$('#speedv').textContent=v);
+bindRange('size',v=>document.documentElement.style.setProperty('--fs',v+'px'));
+bindRange('col',v=>document.documentElement.style.setProperty('--col',v+'%'));
+mode=store.get('mode','speed'); $('#voice').classList.toggle('on',mode==='voice');
+// tap the text while running to show the controls for 3 seconds
+let peekT; $('#scroller').onclick=()=>{ if(!running)return; $('#stage').classList.add('peek'); clearTimeout(peekT); peekT=setTimeout(()=>$('#stage').classList.remove('peek'),3000) };
+document.addEventListener('keydown',e=>{ if($('#stage').hidden)return; if(e.code==='Space'){e.preventDefault();running?stop():play()} if(e.key==='ArrowUp'){ptr=Math.max(0,ptr-5);paint()} if(e.key==='ArrowDown'){ptr=Math.min(words.length-1,ptr+5);paint()} });
+let lock=null; async function wake(){try{if('wakeLock' in navigator&&!lock){lock=await navigator.wakeLock.request('screen');lock.addEventListener('release',()=>lock=null)}}catch(e){}}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&running)wake()});
+</script>
+
+</html>
