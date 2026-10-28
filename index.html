@@ -45,7 +45,10 @@ button,select,input{font:inherit;color:inherit}
 #bar label{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12px;color:var(--muted)}
 #bar input[type=range]{width:90px;accent-color:var(--line)}
 #status{font-family:var(--mono);font-size:12px;color:var(--muted);margin-left:auto;min-width:0}
-#heard{position:absolute;left:0;right:0;bottom:6px;text-align:center;font-family:var(--mono);font-size:12px;color:var(--muted);pointer-events:none}
+#heard{position:absolute;right:max(12px,env(safe-area-inset-right,0px));bottom:10px;max-width:60%;text-align:right;font-family:var(--mono);font-size:13px;color:var(--ink);background:var(--panel);border:1px solid var(--edge);border-radius:8px;padding:6px 10px;pointer-events:none}
+#heard b{color:var(--line);font-weight:500;margin-right:8px}
+#heard.bad b{color:#ff6b5e}
+#heard:empty{display:none}
 @media (prefers-reduced-motion:reduce){#text .w{transition:none}}
 </style>
 
@@ -101,7 +104,7 @@ function open(i){
   });
   $('#picker').hidden=true; $('#stage').hidden=false; reset(); store.set('last',i);
 }
-function reset(){ptr=0;offset=0;target=0;paint();stop();$('#heard').textContent='';}
+function reset(){ptr=0;offset=0;target=0;paint();stop();showMode();}
 function paint(){spans.forEach((sp,k)=>{sp.classList.toggle('done',k<ptr);sp.classList.toggle('now',k===ptr)})}
 
 // ---------- scroll engine
@@ -127,16 +130,23 @@ const SR = window.SpeechRecognition||window.webkitSpeechRecognition;
 let rec=null, listening=false;
 function startVoice(){
   if(!SR){status('This browser cannot listen. Use Chrome, or Speed mode.');return false}
-  rec=new SR(); rec.lang=SCRIPTS[cur].lang==='hi'?'en-IN':'en-IN'; rec.continuous=true; rec.interimResults=true;
+  // Android Chrome drops long continuous sessions, so listen phrase by phrase and restart at once
+  rec=new SR(); rec.lang='en-IN'; rec.continuous=false; rec.interimResults=true; rec.maxAlternatives=1;
+  rec.onstart=()=>mic('Listening',false);
   rec.onresult=e=>{
-    let txt='';for(let r=e.resultIndex;r<e.results.length;r++)txt+=' '+e.results[r][0].transcript;
+    let txt='';for(let r=0;r<e.results.length;r++)txt+=' '+e.results[r][0].transcript;
     const heard=txt.split(/\s+/).map(norm).filter(Boolean); if(!heard.length)return;
-    $('#heard').textContent=heard.slice(-6).join(' ');
+    mic('Heard',false,heard.slice(-6).join(' '));
     follow(heard.slice(-6));
   };
-  rec.onerror=e=>{ if(e.error==='not-allowed'||e.error==='service-not-allowed'){status('The microphone is blocked on this page. Use Speed mode.');listening=false;mode='speed';$('#voice').classList.remove('on')} else status('Listening hiccup: '+e.error) };
-  rec.onend=()=>{ if(listening){try{rec.start()}catch(e){}} };
-  try{rec.start();listening=true;status('Listening…');return true}catch(e){status('Could not start listening.');return false}
+  rec.onerror=e=>{
+    if(e.error==='no-speech'||e.error==='aborted')return;
+    const why={'not-allowed':'Microphone blocked. Allow it: lock icon in the address bar, Permissions, Microphone.','service-not-allowed':'Chrome speech is switched off on this phone.','network':'No internet. Voice needs internet.','audio-capture':'No microphone found.'}[e.error]||('Listening error: '+e.error);
+    mic(why,true);
+    if(e.error!=='network'){listening=false;stop()}
+  };
+  rec.onend=()=>{ if(listening){setTimeout(()=>{try{rec.start()}catch(e){}},50)} };
+  try{rec.start();listening=true;mic('Starting microphone',false);return true}catch(e){mic('Could not start the microphone.',true);return false}
 }
 function stopVoice(){listening=false;if(rec){try{rec.stop()}catch(e){}}}
 const close=(a,b)=>a===b||(a.length>3&&b.length>3&&(a.startsWith(b.slice(0,4))||b.startsWith(a.slice(0,4))));
@@ -160,20 +170,23 @@ function follow(heard){
 
 // ---------- controls
 function status(t){$('#status').textContent=t}
+// always-visible chip on the stage: mode, mic state, last words heard
+function mic(state,bad,words){const h=$('#heard');h.classList.toggle('bad',!!bad);h.innerHTML='<b></b><span></span>';h.querySelector('b').textContent=state;h.querySelector('span').textContent=words||''}
+function showMode(){ if(mode==='speed') mic('Speed mode · '+$('#speed').value+' wpm',false); else if(!listening) mic('Voice mode · press Start and talk',false) }
 function play(){running=true;acc=0;$('#stage').classList.add('running');$('#go').textContent='Pause';
   if(mode==='voice'&&!listening)startVoice(); wake();}
 function stop(){running=false;$('#stage').classList.remove('running','peek');$('#go').textContent='Start';stopVoice(); if(mode==='voice')status('')}
 $('#go').onclick=()=>running?stop():play();
 $('#restart').onclick=()=>{reset()};
 $('#back').onclick=()=>{stop();$('#stage').hidden=true;$('#picker').hidden=false};
-$('#voice').onclick=()=>{mode=mode==='voice'?'speed':'voice';$('#voice').classList.toggle('on',mode==='voice');store.set('mode',mode);
-  if(mode==='voice'&&running)startVoice(); if(mode==='speed'){stopVoice();status('')}};
+$('#voice').onclick=()=>{mode=mode==='voice'?'speed':'voice';$('#voice').classList.toggle('on',mode==='voice');store.set('mode2',mode);
+  if(mode==='voice'&&running)startVoice(); if(mode==='speed'){stopVoice();status('')} showMode()};
 $('#mirror').onclick=()=>{$('#stage').classList.toggle('mirror');$('#mirror').classList.toggle('on')};
 function bindRange(id,fn){const el=$('#'+id);el.value=store.get(id,el.value);fn(el.value);el.oninput=()=>{fn(el.value);store.set(id,el.value)}}
 bindRange('speed',v=>$('#speedv').textContent=v);
 bindRange('size',v=>document.documentElement.style.setProperty('--fs',v+'px'));
 bindRange('col',v=>document.documentElement.style.setProperty('--col',v+'%'));
-mode=store.get('mode','speed'); $('#voice').classList.toggle('on',mode==='voice');
+mode=store.get('mode2','voice'); $('#voice').classList.toggle('on',mode==='voice');
 // tap the text while running to show the controls for 3 seconds
 let peekT; $('#scroller').onclick=()=>{ if(!running)return; $('#stage').classList.add('peek'); clearTimeout(peekT); peekT=setTimeout(()=>$('#stage').classList.remove('peek'),3000) };
 document.addEventListener('keydown',e=>{ if($('#stage').hidden)return; if(e.code==='Space'){e.preventDefault();running?stop():play()} if(e.key==='ArrowUp'){ptr=Math.max(0,ptr-5);paint()} if(e.key==='ArrowDown'){ptr=Math.min(words.length-1,ptr+5);paint()} });
